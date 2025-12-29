@@ -33,7 +33,7 @@ os.makedirs(app.config['REPORTS_FOLDER'], exist_ok=True)
 
 # Connect to Roboflow workflow
 client = InferenceHTTPClient(
-    api_url=os.getenv("ROBOFLOW_API_URL", "https://serverless.roboflow.com"),
+    api_url=os.getenv("ROBOFLOW_API_URL", "https://detect.roboflow.com"),
     api_key=os.getenv("ROBOFLOW_API_KEY")
 )
 
