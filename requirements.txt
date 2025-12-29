@@ -1,6 +1,6 @@
 flask
-inference-sdk
-opencv-python
+inference
+opencv-python-headless
 requests
 yt-dlp
 reportlab
