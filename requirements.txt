@@ -1,5 +1,5 @@
 flask
-inference
+inference>=0.18.0
 opencv-python-headless
 requests
 yt-dlp
