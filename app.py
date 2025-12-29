@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify, send_file
-from inference_sdk import InferenceHTTPClient
 import cv2
 import os
 import tempfile
@@ -31,11 +30,9 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 os.makedirs('static/frames', exist_ok=True)
 os.makedirs(app.config['REPORTS_FOLDER'], exist_ok=True)
 
-# Connect to Roboflow workflow
-client = InferenceHTTPClient(
-    api_url=os.getenv("ROBOFLOW_API_URL", "https://detect.roboflow.com"),
-    api_key=os.getenv("ROBOFLOW_API_KEY")
-)
+# Roboflow API configuration
+ROBOFLOW_API_KEY = os.getenv("ROBOFLOW_API_KEY")
+ROBOFLOW_WORKFLOW_URL = "https://serverless.roboflow.com/artficix/workflows/custom-workflow-2"
 
 def extract_frames(video_path, scan_mode='quick'):
     """Extract frames from video based on scan mode
@@ -126,34 +123,63 @@ def extract_frames(video_path, scan_mode='quick'):
     }, None
 
 def analyze_frames(frames_data):
-    """Send frames to Roboflow and get predictions"""
+    """Send frames to Roboflow and get predictions using direct API call"""
     results = []
     
     for frame in frames_data['frames']:
         try:
-            result = client.run_workflow(
-                workspace_name="artficix",
-                workflow_id="custom-workflow-2",
-                images={
-                    "image": frame['path']
-                },
-                use_cache=True
+            # Read image and convert to base64
+            with open(frame['path'], 'rb') as img_file:
+                image_base64 = base64.b64encode(img_file.read()).decode('utf-8')
+            
+            # Call Roboflow API directly
+            payload = {
+                "api_key": ROBOFLOW_API_KEY,
+                "inputs": {
+                    "image": {
+                        "type": "base64",
+                        "value": image_base64
+                    }
+                }
+            }
+            
+            headers = {
+                "Content-Type": "application/json"
+            }
+            
+            response = requests.post(
+                ROBOFLOW_WORKFLOW_URL,
+                json=payload,
+                headers=headers,
+                timeout=30
             )
             
-            # Parse the result
-            if result and len(result) > 0:
-                prediction_data = result[0].get('predictions', {})
-                predictions = prediction_data.get('predictions', [])
+            if response.status_code == 200:
+                result = response.json()
                 
-                if predictions:
-                    top_prediction = predictions[0]
-                    results.append({
-                        'position': frame['position'],
-                        'timestamp': frame['timestamp'],
-                        'web_path': frame['web_path'],
-                        'class': top_prediction.get('class', 'Unknown'),
-                        'confidence': round(top_prediction.get('confidence', 0) * 100, 2)
-                    })
+                # Parse the result - adjust based on actual API response structure
+                outputs = result.get('outputs', [{}])
+                if outputs and len(outputs) > 0:
+                    prediction_data = outputs[0].get('predictions', {})
+                    predictions = prediction_data.get('predictions', []) if isinstance(prediction_data, dict) else prediction_data
+                    
+                    if predictions and len(predictions) > 0:
+                        top_prediction = predictions[0]
+                        results.append({
+                            'position': frame['position'],
+                            'timestamp': frame['timestamp'],
+                            'web_path': frame['web_path'],
+                            'class': top_prediction.get('class', 'Unknown'),
+                            'confidence': round(top_prediction.get('confidence', 0) * 100, 2)
+                        })
+                    else:
+                        results.append({
+                            'position': frame['position'],
+                            'timestamp': frame['timestamp'],
+                            'web_path': frame['web_path'],
+                            'class': 'Unknown',
+                            'confidence': 0
+                        })
                 else:
                     results.append({
                         'position': frame['position'],
@@ -162,6 +188,16 @@ def analyze_frames(frames_data):
                         'class': 'Unknown',
                         'confidence': 0
                     })
+            else:
+                results.append({
+                    'position': frame['position'],
+                    'timestamp': frame['timestamp'],
+                    'web_path': frame['web_path'],
+                    'class': 'Error',
+                    'confidence': 0,
+                    'error': f'API returned status {response.status_code}'
+                })
+                
         except Exception as e:
             results.append({
                 'position': frame['position'],
@@ -1058,6 +1094,14 @@ def analyze_video_url():
     if not video_url:
         return jsonify({'error': 'Empty URL provided'}), 400
     
+    # Check if it's a YouTube URL - feature under development
+    if is_youtube_url(video_url):
+        return jsonify({
+            'error': 'YouTube video analysis is currently under development. Please upload the video file directly instead.',
+            'feature_unavailable': True,
+            'suggestion': 'You can download the video and upload it using the file upload option.'
+        }), 503
+    
     # Get scan mode (default to 'quick')
     scan_mode = data.get('scan_mode', 'quick')
     if scan_mode not in ['quick', 'deep', 'ultra']:
@@ -1068,12 +1112,9 @@ def analyze_video_url():
     video_path = os.path.join(app.config['UPLOAD_FOLDER'], video_filename)
     
     try:
-        # Check if it's a YouTube URL
-        if is_youtube_url(video_url):
-            downloaded_path, error = download_youtube_video(video_url, video_path)
-        else:
-            video_path += '.mp4'
-            downloaded_path, error = download_video(video_url, video_path)
+        # Download non-YouTube video URL
+        video_path += '.mp4'
+        downloaded_path, error = download_video(video_url, video_path)
         
         if error:
             return jsonify({'error': f'Failed to download video: {error}'}), 400
