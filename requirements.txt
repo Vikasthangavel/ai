@@ -1,5 +1,5 @@
 flask
-inference-sdk
+inference
 opencv-python
 requests
 yt-dlp
