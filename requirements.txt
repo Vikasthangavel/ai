@@ -1,0 +1,7 @@
+flask
+inference-sdk
+opencv-python
+requests
+yt-dlp
+reportlab
+python-dotenv
